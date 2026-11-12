@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.egg-info/
+*.pth
+!weights/*.pth
+outputs/
+/data/
+logs/
+*.png
+!third_party/DEIM/figures/*.png
+.ipynb_checkpoints/
