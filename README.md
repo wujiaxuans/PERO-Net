@@ -1,3 +1,103 @@
+# PERO-Net：红外小目标检测
+
+这份代码用于研究红外图像中小目标的检测。论文主模型由 **PERO-R 检测器、PlainReg 局部精修头和固定分量阻尼**组成：PERO-R 先给出目标位置和分数，PlainReg 进一步调整边界框，阻尼控制调整幅度。精修不直接修改检测分数。
+
+仓库还保留了 **PERO-CBP v5 对照头**，用于对比实验；它不是论文主模型，也不与 PlainReg 叠加。当前训练和评测脚本仍会导入 CBP 相关代码，请不要自行删除这些文件。
+
+## 第一次使用：先看这里
+
+### 仓库里有什么？
+
+| 文件或目录 | 用途 |
+| --- | --- |
+| `nets/rmtq_fine/pero.py`、`pero_jagg.py`、`pero_r.py` | PERO-R 检测器中新增的观察和证据读出代码 |
+| `nets/rmtq_fine/pero_plainreg.py` | 论文主模型使用的 PlainReg 精修头及阻尼 |
+| `third_party/DEIM/` | 基座检测器使用的 DEIM / D-FINE 代码 |
+| `weights/peroR_ep50_ema.pth` | 已训练的 PERO-R 基座权重 |
+| `weights/plainreg_ep50_ema.pth` | 已训练的 PlainReg 精修头权重 |
+| `eval.py` | 对数据集评测基座和精修后的结果 |
+| `train.py` | 在冻结的 PERO-R 基座上训练精修头 |
+| `splits/` | IRDST 的训练和评测标注文件，不含原始图像 |
+
+**注意：** `train.py` 是精修头训练入口，不是从零训练整个 PERO-R 检测器的入口。完整的原始图像需要自行获取，仓库不提供 IRDST 图像。
+
+### 1. 下载代码
+
+在终端执行：
+
+```bash
+git clone https://github.com/wujiaxuans/PERO-CBP.git
+cd PERO-CBP
+```
+
+仓库已包含论文主模型所需的两份权重，不需要从头训练才能查看或评测。
+
+### 2. 准备运行环境
+
+建议使用 Python 3.9 或更高版本，并使用有 NVIDIA 显卡和正确 CUDA 环境的机器。先按自己的系统和 CUDA 版本安装匹配的 PyTorch / torchvision，再在仓库根目录运行：
+
+```bash
+pip install -r requirements.txt
+pip install faster-coco-eval
+```
+
+其中，`faster-coco-eval` 是当前 DEIM 数据加载代码直接导入的依赖，目前未列在 `requirements.txt` 中。不同机器的 CUDA、PyTorch 和 torchvision 需要匹配；如安装失败，请先检查对应环境。以上安装流程尚未在全新环境独立验证。
+
+### 3. 准备 IRDST 图像
+
+自行获取 IRDST 数据集，将图像按标注文件中的相对路径放置，例如：
+
+```text
+data/IRDST/images/
+├── 1/                 # 第 1 个序列
+│   ├── 0.png
+│   └── ...
+├── 2/                 # 第 2 个序列
+│   ├── 0.png
+│   └── ...
+└── ...
+```
+
+具体文件名以 `splits/` 中 COCO 标注的 `file_name` 为准。`data_root` 应指向包含各序列文件夹的图像根目录。
+
+### 4. 评测论文主模型
+
+下面的命令使用仓库中已有权重，在 IRDST 43-even 评测集上运行；请先确认图像已准备好：
+
+```bash
+python eval.py \
+  --data_root ./data/IRDST/images \
+  --peror_weights ./weights/peroR_ep50_ema.pth \
+  --plainreg_weights ./weights/plainreg_ep50_ema.pth \
+  --lc 0.5 --ls 0.75 \
+  --output_dir ./outputs
+```
+
+运行后，终端会显示基座、未阻尼的精修结果和阻尼后的精修结果；详细指标保存在 `outputs/eval_results.json`。其中 `PlainReg + damping` 是论文主模型，`PERO-R` 是未接精修头的基座。
+
+`--lc` 和 `--ls` 分别控制中心和宽高的调整幅度。上面的数值对应仓库记录的 IRDST 配置；其他数据集不能默认沿用同一组数值。
+
+### 5. 如果需要重新训练精修头
+
+下面的命令冻结已有 PERO-R 基座，只训练 PlainReg 精修头。训练过程需要 IRDST 图像、训练标注及基座权重：
+
+```bash
+python train.py --method plainreg \
+  --data_root ./data/IRDST/images \
+  --peror_weights ./weights/peroR_ep50_ema.pth \
+  --output_dir ./outputs
+```
+
+默认训练 50 个 epoch，完成后精修头权重保存在输出目录。需要了解详细结构、对照实验和复现注意事项时，可继续阅读下方英文说明。
+
+## 指标口径提醒
+
+仓库原 README 报告：IRDST 43-even 上，主模型 AP50 为 **0.9629**；论文口径 P/R/F1 为 **0.9865 / 0.9884 / 0.9875**。这些论文口径数字与 `eval.py` 输出的固定置信度 0.5 的 P/R/F1 不是同一计算方式，不能直接混用。原报告也说明该评测集在前期开发过程中已多次使用，不应将它称为完全未参与开发的盲测集。
+
+---
+
+## 原始英文说明
+
 # PERO — pixel-level box refinement for infrared small target detection
 
 Two interchangeable, independently trained refinement heads that correct the
